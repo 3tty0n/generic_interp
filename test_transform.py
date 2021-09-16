@@ -32,10 +32,12 @@ def parse_and_dump(code):
 
     transformer = InterpTransformer(
         pc=visitor.pc, true_path=visitor.true_path,
-        false_path=visitor.false_path, cond=visitor.cond)
+        false_path=visitor.false_path, cond=visitor.cond,
+        entry_pc=visitor.entry_pc)
     transformed = transformer.visit(tree)
-    # pprint(transformed)
-    print astunparse.unparse(transformed)
+    fix_missing_locations(transformed)
+    astpretty.pprint(transformed)
+    # print astunparse.unparse(transformed)
 
 
 def test_parse():
@@ -45,11 +47,12 @@ while True:
     pc += 1
     if opcode == JUMP_IF:
         target = ord(bytecode[pc])
-        transformer(pc=pc,true_path=target,false_path=pc+1,cond=self.is_true)
+        transformer(pc=pc,true_path=target,false_path=pc+1,cond=self.is_true,
+                    entry_pc=target)
         if we_are_not_transformed():
             if self.is_true():
                 if target < pc:
-                    entry_state = target; self.save_state()
+                    # entry_state = target; self.save_state()
                     jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
                                             pc=target, tstack=tstack, self=self)
 

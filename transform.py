@@ -11,6 +11,7 @@ class InterpVisitor(NodeVisitor):
         self.true_path = None
         self.false_path = None
         self.cond = None
+        self.entry_pc = None
 
     def visit_Call(self, node):
         func = node.func
@@ -38,20 +39,28 @@ class InterpVisitor(NodeVisitor):
                         delattr(value, 'lineno')
                         delattr(value, 'col_offset')
                         self.cond = value
+                    elif kwd.arg == "entry_pc":
+                        value = kwd.value
+                        delattr(value, 'lineno')
+                        delattr(value, 'col_offset')
+                        self.entry_pc = value
 
 
 class InterpTransformer(NodeTransformer):
     "For rewriting nodes"
 
-    def __init__(self, pc, true_path, false_path, cond):
+    def __init__(self, pc, true_path, false_path, cond,
+                 entry_pc):
         super(InterpTransformer, self).__init__()
         self.pc = pc # Name(id='pc', ctx=Load())
         self.true_path = true_path # Name(id='target', ctx=Load())
         self.false_path = false_path  # BinOp(left=Name(id='pc', ctx=Load()), op=Add(), right=Num(n=1))
         self.cond = cond
+        self.entry_pc = entry_pc
 
     def visit_If(self, node):
         test = node.test
+        body = node.body
         if isinstance(test, Call):
             if hasattr(test.func, 'id'):
                 if test.func.id == "we_are_not_transformed":
@@ -102,6 +111,8 @@ if __name__ == '__main__':
 
         transformer = InterpTransformer(
             pc=visitor.pc, true_path=visitor.true_path,
-            false_path=visitor.false_path, cond=visitor.cond)
+            false_path=visitor.false_path, cond=visitor.cond,
+            entry_pc=visitor.entry_pc)
         transformed = transformer.visit(tree)
+        fix_missing_locations(transformed)
         print astunparse.unparse(transformed)

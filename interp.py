@@ -1,3 +1,5 @@
+from rpython.rlib import jit
+
 class Frame(object):
 
     def __init__(self, bytecode):
@@ -209,7 +211,8 @@ class Frame(object):
             elif opcode == JUMP_IF:
                 target = ord(bytecode[pc])
                 transformer(pc=pc, true_path=target,
-                            false_path=pc+1, cond=self.is_true)
+                            false_path=pc+1, cond=self.is_true,
+                            entry_pc=target)
                 if we_are_not_transformed():
                     if self.is_true():
                         if target < pc:

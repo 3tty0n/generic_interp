@@ -1,4 +1,9 @@
-from rpython.rlib import jit
+from rpython.rlib import jit, threadedcode
+
+jitdriver = jit.JitDriver(greens=['pc', 'bytecode'],
+                          reds=['self'])
+
+transformer = threadedcode.Transformer(opcode='opcode', pc='pc')
 
 class Frame(object):
 
@@ -210,10 +215,10 @@ class Frame(object):
 
             elif opcode == JUMP_IF:
                 target = ord(bytecode[pc])
-                transformer(pc=pc, true_path=target,
-                            false_path=pc+1, cond=self.is_true,
-                            entry_pc=target)
-                if we_are_not_transformed():
+                transform_branch(pc=pc, true_path=target,
+                                 false_path=pc+1, cond=self.is_true,
+                                 entry_pc=target)
+                if we_are_not_transformed(kind='branch'):
                     if self.is_true():
                         if target < pc:
                             entry_state = target; self.save_state()
@@ -244,19 +249,24 @@ class Frame(object):
                 #         pc += 1
 
             elif opcode == EXIT:
-                if we_are_jitted():
-                    if t_is_empty(tstack):
-                        w_x = self.pop()
-                        pc = entry_state;  self.restore_state()
-                        pc = emit_ret(pc, w_x)
-                        jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
-                                                pc=pc, tstack=tstack, self=self)
-                    else:
-                        pc, tstack = tstack.t_pop()
-                        w_x = self.pop()
-                        pc = emit_ret(pc, w_x)
-                else:
-                    return self.pop()
+                w_x = self.pop()
+                transform_ret(pc=pc, ret_value=w_x)
+                if we_are_not_transformed(kind='ret'):
+                    return w_x
+
+                # if we_are_jitted():
+                #     if t_is_empty(tstack):
+                #         w_x = self.pop()
+                #         # pc = entry_state;  self.restore_state()
+                #         pc = emit_ret(pc, w_x)
+                #         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
+                #                                 pc=pc, tstack=tstack, self=self)
+                #     else:
+                #         pc, tstack = tstack.t_pop()
+                #         w_x = self.pop()
+                #         pc = emit_ret(pc, w_x)
+                # else:
+                #     return w_x
 
             else:
                 assert False, 'Unknown opcode: %d' % opcode

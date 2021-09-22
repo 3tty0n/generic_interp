@@ -1,9 +1,10 @@
-from rpython.rlib import jit, threadedcode
+from rpython.rlib import jit
+from rpython.rlib.jit.threadedcode import *
 
 jitdriver = jit.JitDriver(greens=['pc', 'bytecode'],
                           reds=['self'])
 
-transformer = threadedcode.Transformer(opcode='opcode', pc='pc')
+# transformer = threadedcode.Transformer(opcode='opcode', pc='pc')
 
 class Frame(object):
 

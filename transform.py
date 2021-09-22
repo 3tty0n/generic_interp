@@ -47,11 +47,14 @@ class InterpTransformer(NodeTransformer):
         self.branch_kv = branch_kv
         self.ret_kv = ret_kv
 
-        # self.pc = pc # Name(id='pc', ctx=Load())
-        # self.true_path = true_path # Name(id='target', ctx=Load())
-        # self.false_path = false_path  # BinOp(left=Name(id='pc', ctx=Load()), op=Add(), right=Num(n=1))
-        # self.cond = cond
-        # self.entry_pc = entry_pc
+    def visit_Expr(self, node):
+        value = node.value
+        if isinstance(value, Call):
+            func = value.func
+            if hasattr(func, 'id'):
+                if func.id in ["transform_ret", "transform_jump", "transform_branch"]:
+                    return None
+        return node
 
     def visit_If(self, node):
         test = node.test
@@ -196,6 +199,7 @@ class InterpTransformer(NodeTransformer):
                ])
 
 if __name__ == '__main__':
+    import os
     import astunparse
 
     if len(sys.argv) < 2:
@@ -214,4 +218,8 @@ if __name__ == '__main__':
             jump_kv=jump_kv, branch_kv=branch_kv, ret_kv=ret_kv)
         transformed = transformer.visit(tree)
         fix_missing_locations(transformed)
-        print astunparse.unparse(transformed)
+        unparsed = astunparse.unparse(transformed)
+        fname, ext = os.path.splitext(fname)
+        new_file = open(fname + "_mti" + ext, 'w')
+        new_file.write(unparsed)
+        new_file.close()

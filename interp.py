@@ -200,18 +200,24 @@ class Frame(object):
             elif opcode == JUMP:
                 t = ord(bytecode[pc])
                 pc += 1
-                if we_are_jitted():
-                    if t_is_empty(tstack):
-                        pc = t
-                    else:
-                        pc, tstack = tstack.t_pop()
-                    pc = emit_jump(pc, t)
-                else:
+                transform_jump(pc=pc, target=t)
+                if we_are_not_transformed(kind='jump'):
                     if t < pc:
-                        entry_state = t; self.save_state()
                         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
                                                 pc=t, tstack=tstack, self=self)
                     pc = t
+                # if we_are_jitted():
+                #     if t_is_empty(tstack):
+                #         pc = t
+                #     else:
+                #         pc, tstack = tstack.t_pop()
+                #     pc = emit_jump(pc, t)
+                # else:
+                #     if t < pc:
+                #         entry_state = t; self.save_state()
+                #         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
+                #                                 pc=t, tstack=tstack, self=self)
+                #     pc = t
 
             elif opcode == JUMP_IF:
                 target = ord(bytecode[pc])

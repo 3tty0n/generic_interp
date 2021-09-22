@@ -40,6 +40,7 @@ else:
            'None')
 
 
+@pytest.mark.skip()
 def test_construct_jitted_ret():
     jitted_str = """
 w_x = self.pop()
@@ -49,12 +50,32 @@ if we_are_jitted():
         pc = emit_ret(pc, w_x)
         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
                                 pc=pc, tstack=tstack, self=self)
-
     else:
         pc, tstack = tstack.t_pop()
         pc = emit_ret(pc, w_x)
 else:
     return w_x
+"""
+    tree = ast.parse(jitted_str)
+    astpretty.pprint(tree)
+
+
+def test_construct_jitted_jump():
+    jitted_str = """
+t = ord(bytecode[pc])
+pc += 1
+if we_are_jitted():
+    if t_is_empty(tstack):
+        pc = t
+    else:
+       pc, tstack = tstack.t_pop()
+    pc = emit_jump(pc, t)
+else:
+    if t < pc:
+        entry_state = t; self.save_state()
+        jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
+                                pc=t, tstack=tstack, self=self)
+    pc = t
 """
     tree = ast.parse(jitted_str)
     astpretty.pprint(tree)

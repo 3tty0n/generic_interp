@@ -8,34 +8,43 @@ class InterpVisitor(NodeVisitor):
     def __init__(self):
         super(InterpVisitor, self).__init__()
         self.jump_kv = dict()
+        self.branch_kv = dict()
         self.ret_kv = dict()
 
 
     def visit_Call(self, node):
         func = node.func
         if isinstance(func, Name):
-            if func.id == "transform_branch":
+            if func.id is "transform_branch":
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
-                    self.jump_kv[kwd.arg] = value
-            elif func.id == "transform_ret":
+                    self.branch_kv[kwd.arg] = value
+            elif func.id is "transform_ret":
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
                     self.ret_kv[kwd.arg] = value
+            elif func.id is 'transform_jump':
+                kwds = node.keywords
+                for kwd in kwds:
+                    value = kwd.value
+                    delattr(value, 'lineno')
+                    delattr(value, 'col_offset')
+                    self.jump_kv[kwd.arg] = value
 
 
 class InterpTransformer(NodeTransformer):
     "For rewriting nodes"
 
-    def __init__(self, jump_kv=dict(), ret_kv=dict()):
+    def __init__(self, jump_kv, branch_kv, ret_kv):
         super(InterpTransformer, self).__init__()
         self.jump_kv = jump_kv
+        self.branch_kv = branch_kv
         self.ret_kv = ret_kv
 
         # self.pc = pc # Name(id='pc', ctx=Load())
@@ -53,7 +62,7 @@ class InterpTransformer(NodeTransformer):
                     kwds = test.keywords
                     assert len(kwds) == 1
                     kwd = kwds[0]
-                    assert isinstance(kwd.value, Str)
+                    assert isinstance(kwd.value, Str), "value %s is not str object" % (dump(kwd.value))
                     if kwd.value.s == 'branch':
                         orig_body = node.body
                         new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
@@ -72,28 +81,64 @@ class InterpTransformer(NodeTransformer):
                         copy_location(new_if, node)
                         fix_missing_locations(new_if)
                         return new_if
+                    elif kwd.value.s == 'jump':
+                        orig_body = node.body
+                        new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
+                                              args=[], keywords=[], starargs=None, kwargs=None),
+                                    body=[self._create_jitted_jump(orig_body)],
+                                    orelse=orig_body)
+                        copy_location(new_if, node)
+                        fix_missing_locations(new_if)
+                        return new_if
+                    else:
+                        assert False, "unexpected keyword %s" % (kwd.value.s)
         self.generic_visit(node)
         return node
 
+    def _create_jitted_jump(self, orig_body):
+        jitted = [
+            If(test=Call(func=Name(id='t_is_empty', ctx=Load()),
+                         args=[Name(id='tstack', ctx=Load())],
+                         keywords=[], starargs=None, kwargs=None),
+               body=[
+                   Assign(targets=[Name(id='pc', ctx=Load())],
+                          value=self.jump_kv['target'])
+               ],
+               orelse=[
+                   Assign(targets=[Tuple(elts=[self.jump_kv['pc'],
+                                               Name(id='tstack', ctx=Load())])],
+                          value=Call(
+                              func=Attribute(value=Name(id='tstack', ctx=Load()),
+                                             attr='t_pop', ctx=Load()),
+                              args=[], keywords=[], starargs=None, kwargs=None
+                          ))
+               ]),
+            Assign(targets=[self.jump_kv['pc']],
+                   value=Call(func=Name(id='emit_jump', ctx=Load()),
+                              args=[self.jump_kv['pc'], self.jump_kv['target']],
+                              keywords=[], starargs=None, kwargs=None))
+        ]
+        return jitted
+
     def _create_jitted_jump_if(self, orig_body):
         jitted = \
-            If(test=Call(func=self.jump_kv['cond'],
+            If(test=Call(func=self.branch_kv['cond'],
                          args=[], keywords=[], starargs=[], kwargs=None),
                body=[
                    Assign(targets=[Name(id='tstack', ctx=Store())],
                           value=Call(func=Name(id='t_push', ctx=Load()),
-                                     args=[self.jump_kv['false_path'], Name(id='tstack', ctx=Load())],
+                                     args=[self.branch_kv['false_path'], Name(id='tstack', ctx=Load())],
                                      keywords=[], starargs=None, kwargs=None)),
-                   Assign(targets=[Name(id=self.jump_kv['pc'].id, ctx=Store())],
-                          value=self.jump_kv['true_path'])
+                   Assign(targets=[Name(id=self.branch_kv['pc'].id, ctx=Store())],
+                          value=self.branch_kv['true_path'])
                ],
                orelse=[
                    Assign(targets=[Name(id='tstack', ctx=Store())],
                           value=Call(func=Name(id='t_push', ctx=Load()),
-                                     args=[self.jump_kv['true_path'], Name(id='tstack', ctx=Load())],
+                                     args=[self.branch_kv['true_path'], Name(id='tstack', ctx=Load())],
                                      keywords=[], starargs=None, kwargs=None)),
-                   Assign(targets=[Name(id=self.jump_kv['pc'].id, ctx=Store())],
-                          value=self.jump_kv['false_path'])
+                   Assign(targets=[Name(id=self.branch_kv['pc'].id, ctx=Store())],
+                          value=self.branch_kv['false_path'])
                ])
         return jitted
 
@@ -148,8 +193,7 @@ class InterpTransformer(NodeTransformer):
                            keywords=[], starargs=None, kwargs=None
                        )
                    )
-               ]
-               )
+               ])
 
 if __name__ == '__main__':
     import astunparse
@@ -163,9 +207,11 @@ if __name__ == '__main__':
         visitor = InterpVisitor()
         visitor.visit(tree)
         jump_kv = visitor.jump_kv
+        branch_kv = visitor.branch_kv
         ret_kv = visitor.ret_kv
 
-        transformer = InterpTransformer(jump_kv=jump_kv, ret_kv=ret_kv)
+        transformer = InterpTransformer(
+            jump_kv=jump_kv, branch_kv=branch_kv, ret_kv=ret_kv)
         transformed = transformer.visit(tree)
         fix_missing_locations(transformed)
         print astunparse.unparse(transformed)

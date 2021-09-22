@@ -2,15 +2,17 @@ import sys
 import astpretty
 from ast import *
 
-class InterpVisitor(NodeVisitor):
+class Transformer(object):
+
+    jump_kv = dict()
+    branch_kv = dict()
+    ret_kv = dict()
+
+class InterpVisitor(NodeVisitor, Transformer):
     "For gathering necessary information"
 
-    def __init__(self):
-        super(InterpVisitor, self).__init__()
-        self.jump_kv = dict()
-        self.branch_kv = dict()
-        self.ret_kv = dict()
-
+    def get_all_info(self):
+        return self.jump_kv, self.branch_kv, self.ret_kv
 
     def visit_Call(self, node):
         func = node.func
@@ -38,14 +40,16 @@ class InterpVisitor(NodeVisitor):
                     self.jump_kv[kwd.arg] = value
 
 
-class InterpTransformer(NodeTransformer):
+class InterpTransformer(NodeTransformer, Transformer):
     "For rewriting nodes"
 
-    def __init__(self, jump_kv, branch_kv, ret_kv):
+    def __init__(self, node):
         super(InterpTransformer, self).__init__()
-        self.jump_kv = jump_kv
-        self.branch_kv = branch_kv
-        self.ret_kv = ret_kv
+        InterpVisitor().visit(node)
+        self.node = node
+
+    def transform(self):
+        return self.visit(self.node)
 
     def visit_Expr(self, node):
         value = node.value
@@ -206,20 +210,16 @@ if __name__ == '__main__':
         print "Usage: %s filename" % (sys.argv[0])
         exit(1)
     fname = sys.argv[1]
-    with open(fname) as f:
-        tree = parse(f.read())
-        visitor = InterpVisitor()
-        visitor.visit(tree)
-        jump_kv = visitor.jump_kv
-        branch_kv = visitor.branch_kv
-        ret_kv = visitor.ret_kv
+    f = open(fname, 'r')
+    tree = parse(f.read())
+    f.close()
 
-        transformer = InterpTransformer(
-            jump_kv=jump_kv, branch_kv=branch_kv, ret_kv=ret_kv)
-        transformed = transformer.visit(tree)
-        fix_missing_locations(transformed)
-        unparsed = astunparse.unparse(transformed)
-        fname, ext = os.path.splitext(fname)
-        new_file = open(fname + "_mti" + ext, 'w')
-        new_file.write(unparsed)
-        new_file.close()
+    transformer = InterpTransformer(tree)
+    transformed = transformer.transform()
+    fix_missing_locations(transformed)
+    unparsed = astunparse.unparse(transformed)
+
+    fname, ext = os.path.splitext(fname)
+    new_file = open(fname + "_mti" + ext, 'w')
+    new_file.write(unparsed)
+    new_file.close()

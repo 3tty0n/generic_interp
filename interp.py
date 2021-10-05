@@ -1,10 +1,10 @@
-from rpython.rlib import jit
-from rpython.rlib.jit.threadedcode import *
+from rpython.rlib import jit, threadedcode
+from rpython.rlib.threadedcode import we_are_not_transformed
 
 jitdriver = jit.JitDriver(greens=['pc', 'bytecode'],
                           reds=['self'])
 
-# transformer = threadedcode.Transformer(opcode='opcode', pc='pc')
+transformer = threadedcode.Transformer(pc='pc')
 
 class Frame(object):
 
@@ -201,30 +201,34 @@ class Frame(object):
             elif opcode == JUMP:
                 t = ord(bytecode[pc])
                 pc += 1
-                transform_jump(pc=pc, target=t)
+                transformer.transform_jump(pc=pc, target=t)
                 if we_are_not_transformed(kind='jump'):
                     if t < pc:
                         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
                                                 pc=t, tstack=tstack, self=self)
-                    pc = t
-                # if we_are_jitted():
-                #     if t_is_empty(tstack):
-                #         pc = t
-                #     else:
-                #         pc, tstack = tstack.t_pop()
-                #     pc = emit_jump(pc, t)
-                # else:
-                #     if t < pc:
-                #         entry_state = t; self.save_state()
-                #         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
-                #                                 pc=t, tstack=tstack, self=self)
-                #     pc = t
+                        pc = t
+                        # if we_are_jitted():
+                        #     if t_is_empty(tstack):
+                        #         entry_state = pc; self.save_state()
+                        #         if t < pc:
+                        #             jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
+                        #                                     pc=t, tstack=tstack, self=self)
+                        #         pc = t
+                        #     else:
+                        #         pc, tstack = tstack.t_pop()
+                        #     pc = emit_jump(pc, t)
+                        # else:
+                        #     if t < pc:
+                        #         entry_state = t; self.save_state()
+                        #         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
+                        #                                 pc=t, tstack=tstack, self=self)
+                        #     pc = t
 
             elif opcode == JUMP_IF:
                 target = ord(bytecode[pc])
-                transform_branch(pc=pc, true_path=target,
-                                 false_path=pc+1, cond=self.is_true,
-                                 entry_pc=target)
+                transformer.transform_branch(pc=pc, true_path=target,
+                                             false_path=pc+1, cond=self.is_true,
+                                             entry_pc=target)
                 if we_are_not_transformed(kind='branch'):
                     if self.is_true():
                         if target < pc:
@@ -257,7 +261,7 @@ class Frame(object):
 
             elif opcode == EXIT:
                 w_x = self.pop()
-                transform_ret(pc=pc, ret_value=w_x)
+                transformer.transform_ret(pc=pc, ret_value=w_x)
                 if we_are_not_transformed(kind='ret'):
                     return w_x
 

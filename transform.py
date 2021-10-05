@@ -16,22 +16,22 @@ class InterpVisitor(NodeVisitor, Transformer):
 
     def visit_Call(self, node):
         func = node.func
-        if isinstance(func, Name):
-            if func.id is "transform_branch":
+        if isinstance(func, Attribute):
+            if func.attr is "transform_branch":
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
                     self.branch_kv[kwd.arg] = value
-            elif func.id is "transform_ret":
+            elif func.attr is "transform_ret":
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
                     self.ret_kv[kwd.arg] = value
-            elif func.id is 'transform_jump':
+            elif func.attr is 'transform_jump':
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value

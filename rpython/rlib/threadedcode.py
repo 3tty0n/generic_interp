@@ -11,5 +11,5 @@ class Transformer(object):
     def transform_branch(self, cond, true_path, false_path, **kwargs):
         return None
 
-def we_are_not_translated(kind):
+def we_are_not_transformed(kind):
     return True

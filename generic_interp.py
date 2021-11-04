@@ -201,8 +201,8 @@ class Frame(object):
             elif opcode == JUMP:
                 t = ord(bytecode[pc])
                 pc += 1
-                transformer.transform_jump(pc=pc, target=t)
-                if we_are_not_transformed(kind='jump'):
+                transformer.can_enter_tier1_jump(pc=pc, target=t)
+                if we_are_in_tier2(kind='jump'):
                     if t < pc:
                         jitdriver.can_enter_jit(bytecode=bytecode, entry_state=entry_state,
                                                 pc=t, tstack=tstack, self=self)
@@ -226,10 +226,10 @@ class Frame(object):
 
             elif opcode == JUMP_IF:
                 target = ord(bytecode[pc])
-                transformer.transform_branch(pc=pc, true_path=target,
-                                             false_path=pc+1, cond=self.is_true,
-                                             entry_pc=target)
-                if we_are_not_transformed(kind='branch'):
+                transformer.can_enter_tier1_branch(pc=pc, true_path=target,
+                                                   false_path=pc+1, cond=self.is_true,
+                                                   entry_pc=target)
+                if we_are_in_tier2(kind='branch'):
                     if self.is_true():
                         if target < pc:
                             entry_state = target; self.save_state()
@@ -261,8 +261,8 @@ class Frame(object):
 
             elif opcode == EXIT:
                 w_x = self.pop()
-                transformer.transform_ret(pc=pc, ret_value=w_x)
-                if we_are_not_transformed(kind='ret'):
+                transformer.can_enter_tier1_ret(pc=pc, ret_value=w_x)
+                if we_are_in_tier2(kind='ret'):
                     return w_x
 
                 # if we_are_jitted():

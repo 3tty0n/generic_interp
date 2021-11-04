@@ -2,11 +2,24 @@ import sys
 import astpretty
 from ast import *
 
-class Transformer(object):
 
+CAN_ENTER_TIER1 = "can_enter_tier1"
+WE_ARE_IN_TIER2 = "we_are_in_tier2"
+
+CAN_ENTER_TIER1_BRANCH = "{}_{}".format(CAN_ENTER_TIER1, "branch")
+CAN_ENTER_TIER1_RET = "{}_{}".format(CAN_ENTER_TIER1, "ret")
+CAN_ENTER_TIER1_JUMP = "{}_{}".format(CAN_ENTER_TIER1, "jump")
+
+CAN_ENTER_TIER1_HINTS = [ CAN_ENTER_TIER1_BRANCH,
+                          CAN_ENTER_TIER1_JUMP,
+                          CAN_ENTER_TIER1_JUMP
+                         ]
+
+class Transformer(object):
     jump_kv = dict()
     branch_kv = dict()
     ret_kv = dict()
+
 
 class InterpVisitor(NodeVisitor, Transformer):
     "For gathering necessary information"
@@ -17,21 +30,21 @@ class InterpVisitor(NodeVisitor, Transformer):
     def visit_Call(self, node):
         func = node.func
         if isinstance(func, Attribute):
-            if func.attr is "transform_branch":
+            if func.attr == CAN_ENTER_TIER1_BRANCH:
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
                     self.branch_kv[kwd.arg] = value
-            elif func.attr is "transform_ret":
+            elif func.attr == CAN_ENTER_TIER1_RET:
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
                     delattr(value, 'lineno')
                     delattr(value, 'col_offset')
                     self.ret_kv[kwd.arg] = value
-            elif func.attr is 'transform_jump':
+            elif func.attr == CAN_ENTER_TIER1_JUMP:
                 kwds = node.keywords
                 for kwd in kwds:
                     value = kwd.value
@@ -56,7 +69,7 @@ class InterpTransformer(NodeTransformer, Transformer):
         if isinstance(value, Call):
             func = value.func
             if hasattr(func, 'id'):
-                if func.id in ["transform_ret", "transform_jump", "transform_branch"]:
+                if func.id in CAN_ENTER_TIER1_HINTS:
                     return None
         return node
 
@@ -65,7 +78,7 @@ class InterpTransformer(NodeTransformer, Transformer):
         body = node.body
         if isinstance(test, Call):
             if hasattr(test.func, 'id'):
-                if test.func.id == "we_are_not_transformed":
+                if test.func.id == WE_ARE_IN_TIER2:
                     kwds = test.keywords
                     assert len(kwds) == 1
                     kwd = kwds[0]

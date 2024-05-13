@@ -20,6 +20,11 @@ class Transformer(object):
     branch_kv = dict()
     ret_kv = dict()
 
+    def reset(self):
+        self.jump_kv = dict()
+        self.branch_kv = dict()
+        self.ret_kv = dict()
+
 
 class InterpVisitor(NodeVisitor, Transformer):
     "For gathering necessary information"
@@ -53,11 +58,9 @@ class InterpVisitor(NodeVisitor, Transformer):
                     self.jump_kv[kwd.arg] = value
 
 
-class InterpTransformer(NodeTransformer, Transformer):
-    "For rewriting nodes"
-
+class TracingTransformer(NodeTransformer, Transformer):
     def __init__(self, node):
-        super(InterpTransformer, self).__init__()
+        super(TracingTransformer, self).__init__()
         InterpVisitor().visit(node)
         self.node = node
 
@@ -69,8 +72,77 @@ class InterpTransformer(NodeTransformer, Transformer):
         if isinstance(value, Call):
             func = value.func
             if hasattr(func, 'id'):
-                if func.id in CAN_ENTER_TIER1_HINTS:
-                    return None
+                if func.id in CAN_ENTER_TIER1:
+                    return
+        return node
+
+    def visit_If(self, node):
+        test = node.test
+        body = node.body
+
+        if isinstance(test, Call):
+            if hasattr(test.func, 'id'):
+                if test.func.id == WE_ARE_IN_TIER2:
+                    return body
+
+        self.generic_visit(node)
+        return node
+
+
+class ThreadedTransformer(NodeTransformer, Transformer):
+    "For rewriting nodes"
+
+    def __init__(self, node):
+        super(ThreadedTransformer, self).__init__()
+        InterpVisitor().visit(node)
+        self.node = node
+
+    def transform(self):
+        return self.visit(self.node)
+
+    def visit_Expr(self, node):
+        value = node.value
+        if isinstance(value, Call):
+            func = value.func
+            if func.value.id == "transformer":
+                if func.attr == "can_enter_tier1_jump":
+                    # print(func.value.id, func.attr)
+                    orig_body = Assign(
+                        targets=[self.jump_kv['pc']],
+                        value=self.jump_kv['target']
+                    )
+                    new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
+                                      args=[], keywords=[], starargs=None, kwargs=None),
+                                body=[self._create_jitted_jump(orig_body)],
+                                orelse=[orig_body])
+                    copy_location(new_if, node)
+                    fix_missing_locations(new_if)
+                    return new_if
+                elif func.attr == "can_enter_tier1_ret":
+                    orig_body = Return(value=self.ret_kv['ret_value'])
+                    new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
+                                          args=[], keywords=[], starargs=None, kwargs=None),
+                                body=[self._create_jitted_ret(orig_body)],
+                                orelse=[orig_body])
+                    copy_location(new_if, node)
+                    fix_missing_locations(new_if)
+                    return new_if
+                elif func.attr == "can_enter_tier1_branch":
+                    orig_body = If(
+                        test=Call(func=Name(id='is_true'), ctx=Load(),
+                                  args=[], keywords=[], starargs=None, kwargs=None),
+                        body=Assign(targets=[self.jump_kv['pc']], value=self.jump_kv['target']),
+                        orelse=[]
+                    )
+                    new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
+                                          args=[], keywords=[], starargs=None, kwargs=None),
+                                body=[self._create_jitted_jump_if(orig_body)],
+                                orelse=[orig_body])
+                    copy_location(new_if, node)
+                    fix_missing_locations(new_if)
+                    return new_if
+
+        self.generic_visit(node)
         return node
 
     def visit_If(self, node):
@@ -84,32 +156,11 @@ class InterpTransformer(NodeTransformer, Transformer):
                     kwd = kwds[0]
                     assert isinstance(kwd.value, Str), "value %s is not str object" % (dump(kwd.value))
                     if kwd.value.s == 'branch':
-                        orig_body = node.body
-                        new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
-                                              args=[], keywords=[], starargs=None, kwargs=None),
-                                    body=[self._create_jitted_jump_if(orig_body)],
-                                    orelse=orig_body)
-                        copy_location(new_if, node)
-                        fix_missing_locations(new_if)
-                        return new_if
+                        return
                     elif kwd.value.s == 'ret':
-                        orig_body = node.body
-                        new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
-                                              args=[], keywords=[], starargs=None, kwargs=None),
-                                    body=[self._create_jitted_ret(orig_body)],
-                                    orelse=orig_body)
-                        copy_location(new_if, node)
-                        fix_missing_locations(new_if)
-                        return new_if
+                        return
                     elif kwd.value.s == 'jump':
-                        orig_body = node.body
-                        new_if = If(test=Call(func=Name(id='we_are_jitted', ctx=Load()),
-                                              args=[], keywords=[], starargs=None, kwargs=None),
-                                    body=[self._create_jitted_jump(orig_body)],
-                                    orelse=orig_body)
-                        copy_location(new_if, node)
-                        fix_missing_locations(new_if)
-                        return new_if
+                        return
                     else:
                         assert False, "unexpected keyword %s" % (kwd.value.s)
         self.generic_visit(node)
@@ -205,7 +256,7 @@ class InterpTransformer(NodeTransformer, Transformer):
                    Assign(
                        targets=[Name(id='pc', ctx=Store())],
                        value=Call(
-                           func=Name(id='emit_jump', ctx=Load()),
+                           func=Name(id='emit_ret', ctx=Load()),
                            args=[
                                Name(id='pc', ctx=Load()),
                                self.ret_kv['ret_value']
@@ -218,21 +269,40 @@ class InterpTransformer(NodeTransformer, Transformer):
 if __name__ == '__main__':
     import os
     import astunparse
+    import ast
+    import copy
+    from pprint import pprint
 
     if len(sys.argv) < 2:
-        print "Usage: %s filename" % (sys.argv[0])
+        print "Usage: %s filename tier[n]" % (sys.argv[0])
         exit(1)
     fname = sys.argv[1]
+    tier = sys.argv[2]
     f = open(fname, 'r')
     tree = parse(f.read())
     f.close()
 
-    transformer = InterpTransformer(tree)
-    transformed = transformer.transform()
-    fix_missing_locations(transformed)
-    unparsed = astunparse.unparse(transformed)
+    if tier == "tier1":
+        new_tree = copy.deepcopy(tree)
+        threaded_transformer = ThreadedTransformer(tree)
+        transformed = threaded_transformer.transform()
+        fix_missing_locations(transformed)
+        unparsed = astunparse.unparse(transformed)
 
-    fname, ext = os.path.splitext(fname)
-    new_file = open(fname + "_mti" + ext, 'w')
-    new_file.write(unparsed)
-    new_file.close()
+        new_fname, ext = os.path.splitext(fname)
+        new_file = open(new_fname + "_tier1" + ext, 'w')
+        new_file.write(unparsed)
+        new_file.close()
+    elif tier == "tier2":
+        new_tree = copy.deepcopy(tree)
+        tracing_transformer = TracingTransformer(new_tree)
+        transformed = tracing_transformer.transform()
+        fix_missing_locations(transformed)
+        unparsed = astunparse.unparse(transformed)
+
+        new_fname, ext = os.path.splitext(fname)
+        new_file = open(new_fname + "_tier2" + ext, 'w')
+        new_file.write(unparsed)
+        new_file.close()
+    else:
+        assert False, "tier1 or tier2 should be specified"
